@@ -1,15 +1,18 @@
 import pygame
 
 class Ground:
-    def __init__(self, y, width, height=100, speed=3):
+    def __init__(self, y, width, height=100, speed=3, resource_manager=None):
         self.y = y
         self.width = width
         self.height = height
         self.x = 0
         self.speed = speed
 
-        self.image = pygame.image.load("../assets/images/base.png").convert_alpha()
-        self.image = pygame.transform.scale(self.image, (self.width, self.height))
+        if resource_manager:
+            img = resource_manager.load_image("../assets/images/base.png").convert_alpha()
+        else:
+            img = pygame.image.load("../assets/images/base.png").convert_alpha()
+        self.image = pygame.transform.scale(img, (self.width, self.height))
 
     def update(self):
         # hiệu ứng mặt đất di chuyển

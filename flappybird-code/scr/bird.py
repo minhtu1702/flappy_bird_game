@@ -2,7 +2,7 @@ import pygame
 import os
 
 class Bird:
-    def __init__(self, x, y, bird_type="red"):
+    def __init__(self, x, y, bird_type="red", resource_manager=None):
         self.x = x
         self.y = y
         self.velocity = 0
@@ -20,41 +20,59 @@ class Bird:
         # `drag`: ma sát nhẹ làm mượt sự thay đổi vận tốc
         self.drag = 0.996
         self.bird_type = bird_type
+        self.resource_manager = resource_manager
 
         # load images based on bird_type
         self.images = []
         
-        # If a skin file is provided, use that exact image to construct
-        # gameplay animation frames (slight roto variants) so the bird
-        # in-game visually matches the chosen preview.
-        if isinstance(bird_type, str) and bird_type.endswith('.png'):
+        # If bird_type is a list/tuple of image paths, load them as animation frames
+        if isinstance(bird_type, (list, tuple)):
             try:
-                skin_img = pygame.image.load(bird_type).convert_alpha()
-                skin_img = pygame.transform.scale(skin_img, (34, 24))
-
-                # Create three frames from the skin to simulate flapping:
-                # center, slight up-tilt, slight down-tilt.
-                frame_center = skin_img
-                frame_up = pygame.transform.rotozoom(skin_img, 6, 1.0)
-                frame_down = pygame.transform.rotozoom(skin_img, -6, 1.0)
-
-                # Ensure frames have same size by centering onto surfaces
-                w, h = 34, 24
-                def fit_frame(img):
-                    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-                    r = img.get_rect(center=(w//2, h//2))
+                for p in bird_type:
+                    if self.resource_manager:
+                        img = self.resource_manager.load_image(p).convert_alpha()
+                    else:
+                        img = pygame.image.load(p).convert_alpha()
+                    img = pygame.transform.scale(img, (34, 24))
+                    surf = pygame.Surface((34, 24), pygame.SRCALPHA)
+                    r = img.get_rect(center=(34//2, 24//2))
                     surf.blit(img, r)
-                    return surf
-
-                self.images = [fit_frame(frame_center), fit_frame(frame_up), fit_frame(frame_down)]
+                    self.images.append(surf)
+                if not self.images:
+                    self.load_default_bird()
             except Exception as e:
-                print(f"Error loading skin {bird_type}: {e}")
+                print(f"Error loading skin list {bird_type}: {e}")
                 print(f"Current directory: {os.getcwd()}")
-                # Fallback to animated default bird
                 self.load_default_bird()
         else:
-            # Load base images (red/blue/yellow animation frames)
-            self.load_default_bird()
+            # If a single skin file is provided, create three rotated frames
+            if isinstance(bird_type, str) and bird_type.endswith('.png'):
+                try:
+                    if self.resource_manager:
+                        skin_img = self.resource_manager.load_image(bird_type).convert_alpha()
+                    else:
+                        skin_img = pygame.image.load(bird_type).convert_alpha()
+                    skin_img = pygame.transform.scale(skin_img, (34, 24))
+
+                    frame_center = skin_img
+                    frame_up = pygame.transform.rotozoom(skin_img, 6, 1.0)
+                    frame_down = pygame.transform.rotozoom(skin_img, -6, 1.0)
+
+                    def fit_frame(img):
+                        surf = pygame.Surface((34, 24), pygame.SRCALPHA)
+                        r = img.get_rect(center=(34//2, 24//2))
+                        surf.blit(img, r)
+                        return surf
+
+                    self.images = [fit_frame(frame_center), fit_frame(frame_up), fit_frame(frame_down)]
+                except Exception as e:
+                    print(f"Error loading skin {bird_type}: {e}")
+                    print(f"Current directory: {os.getcwd()}")
+                    # Fallback to animated default bird
+                    self.load_default_bird()
+            else:
+                # Load base images (red/blue/yellow animation frames)
+                self.load_default_bird()
 
         self.image_index = 0
         self.image = self.images[self.image_index]
@@ -71,11 +89,17 @@ class Bird:
         the `self.bird_type` is used to pick a tint (red/blue/yellow) as before.
         """
         # Tải 3 khung ảnh mặc định (up/mid/down) để làm hoạt ảnh vỗ cánh
-        base_images = [
-            pygame.image.load("../assets/images/redbird-upflap.png").convert_alpha(),
-            pygame.image.load("../assets/images/redbird-midflap.png").convert_alpha(),
-            pygame.image.load("../assets/images/redbird-downflap.png").convert_alpha()
+        paths = [
+            "../assets/images/redbird-upflap.png",
+            "../assets/images/redbird-midflap.png",
+            "../assets/images/redbird-downflap.png"
         ]
+        base_images = []
+        for p in paths:
+            if self.resource_manager:
+                base_images.append(self.resource_manager.load_image(p).convert_alpha())
+            else:
+                base_images.append(pygame.image.load(p).convert_alpha())
 
         # tint colors default map (used only if tint_color not explicitly provided)
         default_colors = {
@@ -132,8 +156,9 @@ class Bird:
         # animation chim
         self.animation_time += 1
         if self.animation_time % 5 == 0:  # thay đổi hình mỗi 5 frame
-            self.image_index = (self.image_index + 1) % 3
-            self.image = self.images[self.image_index]
+            if self.images:
+                self.image_index = (self.image_index + 1) % len(self.images)
+                self.image = self.images[self.image_index]
 
     def draw(self, screen):
         rotated_image = pygame.transform.rotate(self.image, self.angle)

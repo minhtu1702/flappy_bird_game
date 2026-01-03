@@ -1,12 +1,15 @@
 import pygame
 
 class PowerUp:
-    def __init__(self, x, y, type="speed"):
+    def __init__(self, x, y, type="speed", resource_manager=None):
         self.x = x
         self.y = y
         self.type = type
         self.speed = 3
-        self.image = pygame.image.load("../assets/images/0.png").convert_alpha()  # use number as icon
+        if resource_manager:
+            self.image = resource_manager.load_image("../assets/images/0.png").convert_alpha()
+        else:
+            self.image = pygame.image.load("../assets/images/0.png").convert_alpha()
         self.rect = self.image.get_rect(center=(x, y))
 
     def update(self):

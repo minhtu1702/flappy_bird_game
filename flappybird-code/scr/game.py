@@ -1,14 +1,16 @@
 import pygame
 import random
 import os
+import math
 from bird import Bird
 from pipe import Pipe
 from ground import Ground
 from particle import Particle
 from powerup import PowerUp
+from utils import ResourceManager, FileManager
 
 class Game:
-    def __init__(self, screen):
+    def __init__(self, screen, resource_manager=None, file_manager=None):
         self.screen = screen
         self.width, self.height = screen.get_size()
         self.clock = pygame.time.Clock()
@@ -19,10 +21,14 @@ class Game:
         # trạng thái game
         self.state = "MENU"  # MENU, PLAYING, GAME_OVER
 
-        # load assets
-        self.bg_day = pygame.image.load("../assets/images/banngay.png").convert()
-        self.bg_evening = pygame.image.load("../assets/images/bandem.png").convert()
-        self.bg_night = pygame.image.load("../assets/images/bandem.png").convert()
+        # resource/file managers
+        self.resource_manager = resource_manager if resource_manager is not None else ResourceManager()
+        self.file_manager = file_manager if file_manager is not None else FileManager()
+
+        # load assets via ResourceManager
+        self.bg_day = self.resource_manager.load_image("../assets/images/banngay.png").convert()
+        self.bg_evening = self.resource_manager.load_image("../assets/images/bandem.png").convert()
+        self.bg_night = self.resource_manager.load_image("../assets/images/bandem.png").convert()
 
         self.bg_day = pygame.transform.scale(self.bg_day, (self.width, self.height))
         self.bg_evening = pygame.transform.scale(self.bg_evening, (self.width, self.height))
@@ -37,51 +43,99 @@ class Game:
         self.bg_transition_speed = 0.015
         # Nếu true => đang trong quá trình chuyển nền (crossfade)
         self.bg_transition_active = False
+        # background horizontal offsets for subtle motion
+        self.bg_offsets = [0.0 for _ in self.bg_list]
+        # scroll speeds (pixels per frame) for day, evening, night
+        self.bg_scroll_speeds = [0.35, 0.12, 0.04][:len(self.bg_list)]
+
+        # starfield for night background (drawn on top)
+        self.stars = []
+        if len(self.bg_list) >= 3:
+            for _ in range(80):
+                sx = random.randint(0, self.width)
+                sy = random.randint(0, max(1, self.height // 2))
+                ssize = random.randint(1, 3)
+                phase = random.random() * 2 * math.pi
+                spd = random.uniform(0.02, 0.5)
+                alpha_base = random.randint(120, 220)
+                self.stars.append({
+                    'x': sx, 'y': sy, 'size': ssize, 'phase': phase, 'speed': spd, 'alpha_base': alpha_base
+                })
         # Bộ đếm thời gian bay liên tục (tính theo frame)
         self.flight_timer_frames = 0
         # Ngưỡng thời gian (giây) để kích hoạt đổi ngày/đêm luân phiên
-        self.bg_time_threshold_seconds = 25
+        self.bg_time_threshold_seconds = 20
         # Giả định ~60 FPS; chuyển sang frame tương ứng (có thể điều chỉnh)
         self.bg_time_threshold_frames = int(self.bg_time_threshold_seconds * 60)
 
         # load số cho điểm
         self.numbers = []
         for i in range(10):
-            img = pygame.image.load(f"../assets/images/{i}.png").convert_alpha()
+            img = self.resource_manager.load_image(f"../assets/images/{i}.png").convert_alpha()
             self.numbers.append(img)
 
-        # load âm thanh
+        # load sounds via ResourceManager
         pygame.mixer.init()
         self.sounds = {
-            'wing': pygame.mixer.Sound("../assets/sound/wing.wav"),
-            'point': pygame.mixer.Sound("../assets/sound/point.wav"),
-            'hit': pygame.mixer.Sound("../assets/sound/hit.wav"),
-            'die': pygame.mixer.Sound("../assets/sound/die.wav"),
-            'swoosh': pygame.mixer.Sound("../assets/sound/swoosh.wav")
+            'wing': self.resource_manager.load_sound("wing.wav"),
+            'point': self.resource_manager.load_sound("point.wav"),
+            'hit': self.resource_manager.load_sound("hit.wav"),
+            'die': self.resource_manager.load_sound("die.wav"),
+            'swoosh': self.resource_manager.load_sound("swoosh.wav")
         }
 
         # high score
         self.high_score = self.load_high_score()
 
         # ⭐ KHAI BÁO bird_types MỘT LẦN DUY NHẤT
-        # Đặt mục đầu tiên là chim mặc định (sử dụng bộ ảnh animated red bird)
+        # Each bird is defined as a list of its animation frame file paths.
         self.bird_types = [
-            "red",  # special key -> use default animated bird
-            "../assets/images/xanhla.png",
-            "../assets/images/vang.png",
-            "../assets/images/mu3.png",
-            "../assets/images/trang.png",
-            "../assets/images/tim.png"
+            [
+                "../assets/images/chim do 1.png",
+                "../assets/images/chim do 2.png",
+                "../assets/images/chim do 3.png",
+            ],
+            [
+                "../assets/images/chim den 1.png",
+                "../assets/images/chim den 2.png",
+                "../assets/images/chim den 3.png",
+            ],
+            [
+                "../assets/images/chim xanh nước 1.png",
+                "../assets/images/chim xanh nước 2.png",
+                "../assets/images/chim xanh nước 3.png",
+            ],
+            [
+                "../assets/images/chim tim 1.png",
+                "../assets/images/chim tim 2.png",
+                "../assets/images/chim tim 3.png",
+            ],
+            [
+                "../assets/images/chim trang 1.png",
+                "../assets/images/chim trang 2.png",
+                "../assets/images/chim trang 3.png",
+            ],
+            [
+                "../assets/images/chim vang 1.png",
+                "../assets/images/chim vang 2.png",
+                "../assets/images/chim vang 3.png",
+            ],
+            [
+                "../assets/images/chim xanh lá 1.png",
+                "../assets/images/chim xanh lá 2.png",
+                "../assets/images/chim xanh lá 3.png",
+            ]
         ]
 
-        # ⭐ Tên hiển thị cho từng loại chim
+        # ⭐ Tên hiển thị cho từng loại chim (theo thứ tự trên)
         self.bird_names = [
-            "Red Bird",
-            "Green Bird",
-            "Yellow Bird", 
-            "Hat Bird",
-            "White Bird",
-            "Purple Bird"
+            "Chim Đỏ",
+            "Chim Đen",
+            "Chim Xanh Nước",
+            "Chim Tím",
+            "Chim Trắng",
+            "Chim Vàng",
+            "Chim Xanh Lá"
         ]
 
         self.selected_bird = 0
@@ -91,14 +145,35 @@ class Game:
         print("\n=== Loading Bird Previews ===")
         for i, bird_path in enumerate(self.bird_types):
             try:
-                # Nếu là key đặc biệt (ví dụ "red"), tạo preview từ ảnh default
-                if not (isinstance(bird_path, str) and bird_path.endswith('.png')):
-                    # load the default mid flap and tint if possible
-                    base = pygame.image.load("../assets/images/redbird-midflap.png").convert_alpha()
-                    # simple tint map for known keys
-                    tint_map = {
-                        "red": (255, 0, 0),
-                    }
+                # Handle multiple types: list of files, directory, single png, or special key
+                if isinstance(bird_path, (list, tuple)):
+                    # use first image in list as preview
+                    if self.resource_manager:
+                        preview_img = self.resource_manager.load_image(bird_path[0]).convert_alpha()
+                    else:
+                        preview_img = pygame.image.load(bird_path[0]).convert_alpha()
+                elif isinstance(bird_path, str) and os.path.isdir(bird_path):
+                    files = sorted([f for f in os.listdir(bird_path) if f.lower().endswith('.png')])
+                    if files:
+                        if self.resource_manager:
+                            preview_img = self.resource_manager.load_image(os.path.join(bird_path, files[0])).convert_alpha()
+                        else:
+                            preview_img = pygame.image.load(os.path.join(bird_path, files[0])).convert_alpha()
+                    else:
+                        raise FileNotFoundError(f"No pngs in directory {bird_path}")
+                elif isinstance(bird_path, str) and bird_path.endswith('.png'):
+                    # Load single image
+                    if self.resource_manager:
+                        preview_img = self.resource_manager.load_image(bird_path).convert_alpha()
+                    else:
+                        preview_img = pygame.image.load(bird_path).convert_alpha()
+                else:
+                    # special key (e.g. "red") -> create preview from default redbird
+                    if self.resource_manager:
+                        base = self.resource_manager.load_image("../assets/images/redbird-midflap.png").convert_alpha()
+                    else:
+                        base = pygame.image.load("../assets/images/redbird-midflap.png").convert_alpha()
+                    tint_map = {"red": (255, 0, 0)}
                     tint = tint_map.get(bird_path, None)
                     if tint is not None:
                         img = base.copy()
@@ -106,9 +181,6 @@ class Game:
                         preview_img = img
                     else:
                         preview_img = base
-                else:
-                    # Load ảnh gốc
-                    preview_img = pygame.image.load(bird_path).convert_alpha()
                 print(f"✓ [{i}] Loaded: {bird_path}")
                 print(f"    Original size: {preview_img.get_size()}")
                 
@@ -164,27 +236,16 @@ class Game:
         self.replay_rect = None
 
     def load_high_score(self):
-        try:
-            with open("highscore.txt", "r") as f:
-                return int(f.read())
-        except:
-            return 0
+        return self.file_manager.read_high_score()
 
     def save_high_score(self):
-        with open("highscore.txt", "w") as f:
-            f.write(str(self.high_score))
+        self.file_manager.write_high_score(self.high_score)
 
     def load_achievements(self):
-        try:
-            with open("achievements.txt", "r") as f:
-                return set(line.strip() for line in f)
-        except:
-            return set()
+        return self.file_manager.read_achievements()
 
     def save_achievements(self):
-        with open("achievements.txt", "w") as f:
-            for ach in self.achievements:
-                f.write(ach + "\n")
+        self.file_manager.write_achievements(self.achievements)
 
     def check_achievements(self):
         if self.score >= 1 and "First Pipe" not in self.achievements:
@@ -198,34 +259,40 @@ class Game:
             self.new_achievement = "Score 50"
         self.save_achievements()
 
-    # Lưu ý: chuyển nền giờ được điều khiển theo thời gian bay, không theo điểm.
+    # Lưu ý: chuyển nền được điều khiển theo thời gian bay, không theo điểm.
 
     def set_difficulty(self):
         if self.selected_difficulty == 0:  # Easy
             self.pipe_speed = 1.8
             self.gravity = 0.35
-            self.spawn_spacing = 260
+            # slightly increase spacing so Easy feels more relaxed
+            self.spawn_spacing = 290
             self.max_vertical_shift = 40
-            self.gap_min, self.gap_max = 170, 240
+            # Reduce gap size (easier still than others but smaller than before)
+            self.gap_min, self.gap_max = 150, 200
         elif self.selected_difficulty == 1:  # Medium
             self.pipe_speed = 2.8
             self.gravity = 0.45
-            self.spawn_spacing = 220
+            # increase spacing a bit for Medium
+            self.spawn_spacing = 250
             self.max_vertical_shift = 60
-            self.gap_min, self.gap_max = 150, 220
+            # Reduce gap size for Medium to increase difficulty
+            self.gap_min, self.gap_max = 130, 180
         elif self.selected_difficulty == 2:  # Hard
             self.pipe_speed = 3.8
             self.gravity = 0.55
-            self.spawn_spacing = 190
+            # increase spacing slightly for Hard to be fair
+            self.spawn_spacing = 220
             self.max_vertical_shift = 80
-            self.gap_min, self.gap_max = 140, 200
+            # Reduce gap size for Hard to make it more challenging
+            self.gap_min, self.gap_max = 120, 160
         self.bird.gravity = self.gravity
 
     def reset_game(self):
-        self.bird = Bird(100, 300, self.bird_types[self.selected_bird])
+        self.bird = Bird(100, 300, self.bird_types[self.selected_bird], resource_manager=self.resource_manager)
         self.pipes = []
         self.score = 0
-        self.ground = Ground(self.height - 100, self.width)
+        self.ground = Ground(self.height - 100, self.width, resource_manager=self.resource_manager)
         self.pipe_speed = 2.8
         self.spawn_spacing = 220
         self.max_vertical_shift = 60
@@ -237,6 +304,10 @@ class Game:
         self.power_timer = 0
         # reset flight timer khi bắt đầu/trò chơi đặt lại
         self.flight_timer_frames = 0
+        # pipe spawn pattern state to make gaps less predictable
+        self.pipe_pattern = None
+        self.pipe_pattern_count = 0
+        self.pipe_zig_dir = 1
 
     def handle_event(self, event):
         if self.state == "MENU":
@@ -246,7 +317,7 @@ class Game:
                         # Start Game
                         self.state = "PLAYING"
                         self.sounds['swoosh'].play()
-                        self.bird = Bird(100, 300, self.bird_types[self.selected_bird])
+                        self.bird = Bird(100, 300, self.bird_types[self.selected_bird], resource_manager=self.resource_manager)
                         self.set_difficulty()
                     elif self.menu_option == 1:
                         # Setup
@@ -280,6 +351,22 @@ class Game:
                 elif event.key == pygame.K_SPACE or event.key == pygame.K_ESCAPE:
                     # Quay lại menu chính sau khi setup xong
                     self.state = "MENU"
+                    self.sounds['swoosh'].play()
+            # Mouse click on arrow buttons
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                if getattr(self, 'left_btn_rect', None) and self.left_btn_rect.collidepoint((mx, my)):
+                    self.selected_bird = (self.selected_bird - 1) % len(self.bird_types)
+                    self.sounds['swoosh'].play()
+                elif getattr(self, 'right_btn_rect', None) and self.right_btn_rect.collidepoint((mx, my)):
+                    self.selected_bird = (self.selected_bird + 1) % len(self.bird_types)
+                    self.sounds['swoosh'].play()
+                # also allow clicks on the hint buttons below
+                elif getattr(self, 'hint_left_rect', None) and self.hint_left_rect.collidepoint((mx, my)):
+                    self.selected_bird = (self.selected_bird - 1) % len(self.bird_types)
+                    self.sounds['swoosh'].play()
+                elif getattr(self, 'hint_right_rect', None) and self.hint_right_rect.collidepoint((mx, my)):
+                    self.selected_bird = (self.selected_bird + 1) % len(self.bird_types)
                     self.sounds['swoosh'].play()
 
         elif self.state == "PLAYING":
@@ -318,6 +405,15 @@ class Game:
                 self.bg_transition_progress = 0.0
                 self.bg_current = self.bg_next
                 self.bg_transition_active = False
+        # update subtle background scrolling offsets and starfield
+        for i in range(len(self.bg_offsets)):
+            self.bg_offsets[i] = (self.bg_offsets[i] + self.bg_scroll_speeds[i]) % max(1, self.width)
+        if self.stars:
+            for s in self.stars:
+                s['x'] -= s['speed']
+                if s['x'] < 0:
+                    s['x'] += self.width
+                s['phase'] += 0.04
         if self.state == "PLAYING":
             self.bird.update()
             self.frame_count += 1
@@ -367,17 +463,52 @@ class Game:
                 top_limit = 80 + gap_height // 2
                 bottom_limit = self.ground.y - 80 - gap_height // 2
 
-                # start from previous gap center and shift within max_vertical_shift
+                # previous gap center
                 prev = getattr(self, 'last_gap_y', self.height // 2)
-                new_center = prev + random.randint(-self.max_vertical_shift, self.max_vertical_shift)
-                # clamp
+
+                # Choose or continue a pipe pattern to make vertical placement harder to predict
+                if not getattr(self, 'pipe_pattern', None) or self.pipe_pattern_count <= 0:
+                    r = random.random()
+                    if r < 0.40:
+                        self.pipe_pattern = 'random'
+                        self.pipe_pattern_count = random.randint(1, 3)
+                    elif r < 0.70:
+                        self.pipe_pattern = 'smooth'
+                        self.pipe_pattern_count = random.randint(2, 5)
+                    else:
+                        self.pipe_pattern = 'zigzag'
+                        self.pipe_pattern_count = random.randint(3, 6)
+                        self.pipe_zig_dir = random.choice([-1, 1])
+
+                if self.pipe_pattern == 'random':
+                    # anywhere in bounds
+                    new_center = random.randint(top_limit, bottom_limit)
+
+                elif self.pipe_pattern == 'zigzag':
+                    # alternate moving up/down by a larger step to force unpredictability
+                    step = max(20, self.max_vertical_shift)
+                    new_center = prev + self.pipe_zig_dir * step
+                    # flip direction occasionally
+                    if random.random() < 0.4:
+                        self.pipe_zig_dir *= -1
+
+                else:  # smooth
+                    # mostly small shifts with occasional jitter
+                    shift = random.randint(-max(6, self.max_vertical_shift // 2), max(6, self.max_vertical_shift // 2))
+                    jitter = random.randint(-5, 5)
+                    new_center = prev + shift + jitter
+
+                # clamp into allowed range
                 new_center = max(top_limit, min(bottom_limit, new_center))
 
-                self.pipes.append(Pipe(self.width, new_center, gap_height))
+                self.pipes.append(Pipe(self.width, new_center, gap_height, resource_manager=self.resource_manager))
+                # ensure pipes use resource manager for images
+                self.pipes[-1].image_bottom = self.pipes[-1].image_bottom
                 self.last_gap_y = new_center
+                self.pipe_pattern_count -= 1
                 # add powerup randomly
                 if random.random() < 0.1:  # 10% chance
-                    self.powerups.append(PowerUp(self.width, random.randint(200, 400)))
+                    self.powerups.append(PowerUp(self.width, random.randint(200, 400), resource_manager=self.resource_manager))
 
             # update powerups
             for pu in self.powerups[:]:
@@ -456,28 +587,106 @@ class Game:
                 alpha_next = int(progress * 255)
                 alpha_cur = 255 - alpha_next
 
-                cur_surf = self.bg_list[self.bg_current].copy()
-                next_surf = self.bg_list[self.bg_next].copy()
+                # For transitioning, draw both backgrounds with their own offsets
+                cur_idx = self.bg_current
+                next_idx = self.bg_next
+
+                cur_surf = self.bg_list[cur_idx].copy()
+                next_surf = self.bg_list[next_idx].copy()
+
+                # apply scrolling offsets for each
+                cur_off = int(self.bg_offsets[cur_idx])
+                next_off = int(self.bg_offsets[next_idx])
+
                 cur_surf.set_alpha(alpha_cur)
                 next_surf.set_alpha(alpha_next)
 
-                # draw blended
-                self.screen.blit(cur_surf, (0, 0))
-                self.screen.blit(next_surf, (0, 0))
+                # draw tiled with offsets
+                self.screen.blit(cur_surf, (-cur_off, 0))
+                self.screen.blit(cur_surf, (self.width - cur_off, 0))
+                self.screen.blit(next_surf, (-next_off, 0))
+                self.screen.blit(next_surf, (self.width - next_off, 0))
             else:
-                self.screen.blit(self.bg_list[self.bg_current], (0, 0))
+                # draw scrolling background (tile horizontally for continuous motion)
+                cur_idx = self.bg_current
+                cur_surf = self.bg_list[cur_idx]
+                offset = int(self.bg_offsets[cur_idx])
+                self.screen.blit(cur_surf, (-offset, 0))
+                self.screen.blit(cur_surf, (self.width - offset, 0))
 
         if self.state == "MENU":
+            # animated title bob for liveliness
+            bob = int(math.sin(pygame.time.get_ticks() / 600.0) * 6)
+            title_y = 140 + bob
+            shadow = self.large_font.render("Flappy Bird", True, (0, 0, 0))
             title_text = self.large_font.render("Flappy Bird", True, (255, 255, 255))
-            self.screen.blit(title_text, (self.width // 2 - title_text.get_width() // 2, 150))
+            tx = self.width // 2 - title_text.get_width() // 2
+            self.screen.blit(shadow, (tx + 4, title_y + 4))
+            self.screen.blit(title_text, (tx, title_y))
 
+            # translucent panel behind options
+            panel_w, panel_h = 320, 220
+            panel_x = self.width // 2 - panel_w // 2
+            panel_y = title_y + 70
+            panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            panel.fill((10, 10, 10, 140))
+            self.screen.blit(panel, (panel_x, panel_y))
+
+            # options as rounded buttons
             options = ["Start Game", "Setup", "Exit"]
+            btn_w, btn_h = 220, 44
+            spacing = 14
             for i, opt in enumerate(options):
-                color = (255, 255, 0) if i == self.menu_option else (255, 255, 255)
-                text = self.font.render(f"{'> ' if i == self.menu_option else '  '}{opt}", True, color)
-                self.screen.blit(text, (self.width // 2 - text.get_width() // 2, 250 + i * 50))
+                btn_x = self.width // 2 - btn_w // 2
+                btn_y = panel_y + 20 + i * (btn_h + spacing)
+                rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+                if i == self.menu_option:
+                    pygame.draw.rect(self.screen, (255, 200, 0), rect, border_radius=22)
+                    pygame.draw.rect(self.screen, (200, 150, 0), rect, 3, border_radius=22)
+                    text = self.font.render(opt, True, (30, 30, 30))
+                else:
+                    pygame.draw.rect(self.screen, (80, 80, 80), rect, border_radius=22)
+                    pygame.draw.rect(self.screen, (120, 120, 120), rect, 2, border_radius=22)
+                    text = self.font.render(opt, True, (230, 230, 230))
+                self.screen.blit(text, (rect.x + rect.w // 2 - text.get_width() // 2, rect.y + rect.h // 2 - text.get_height() // 2))
 
-        elif self.state == "PLAYING":
+            # show small bird preview next to the panel (for Setup preview/visual polish)
+            try:
+                preview = self.bird_previews[self.selected_bird]
+                pv_w, pv_h = preview.get_size()
+                scale = 0.8
+                sw, sh = int(pv_w * scale), int(pv_h * scale)
+                preview_s = pygame.transform.smoothscale(preview, (sw, sh))
+                pv_x = panel_x - sw - 20
+                pv_y = panel_y + panel_h // 2 - sh // 2
+                # white frame behind
+                pygame.draw.rect(self.screen, (255, 255, 255), (pv_x - 6, pv_y - 6, sw + 12, sh + 12), border_radius=8)
+                self.screen.blit(preview_s, (pv_x, pv_y))
+            except Exception:
+                pass
+
+        # If night background is active, draw starfield on top for twinkle/motion
+        # Draw whenever night is current OR next during a transition to make it smooth
+        night_indices = []
+        if len(self.bg_list) >= 3:
+            night_indices.append(2)
+        draw_stars = False
+        if self.bg_transition_active:
+            if self.bg_current in night_indices or self.bg_next in night_indices:
+                draw_stars = True
+        else:
+            if self.bg_current in night_indices:
+                draw_stars = True
+
+        if draw_stars and self.stars:
+            star_surf = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            for s in self.stars:
+                a = int(max(10, min(255, s['alpha_base'] + math.sin(s['phase']) * 60)))
+                col = (255, 255, 255, a)
+                pygame.draw.circle(star_surf, col, (int(s['x']), int(s['y'])), s['size'])
+            self.screen.blit(star_surf, (0, 0))
+
+        if self.state == "PLAYING":
             self.bird.draw(self.screen)
             for pipe in self.pipes:
                 pipe.draw(self.screen)
@@ -618,12 +827,36 @@ class Game:
                 error_text = self.small_font.render("No preview available", True, (255, 0, 0))
                 self.screen.blit(error_text, (self.width // 2 - error_text.get_width() // 2, 250))
 
-            # ⭐ Vẽ mũi tên trái phải
+
+            # ⭐ VẼ nút mũi tên trái/phải giống style của hint buttons (đồng bộ)
             arrow_y = 260
-            left_arrow = self.font.render("◀", True, (255, 255, 255))
-            right_arrow = self.font.render("▶", True, (255, 255, 255))
-            self.screen.blit(left_arrow, (self.width // 2 - 100, arrow_y))
-            self.screen.blit(right_arrow, (self.width // 2 + 80, arrow_y))
+            btn_w, btn_h = 36, 36
+            left_btn_rect = pygame.Rect(self.width // 2 - 100 - btn_w // 2, arrow_y - 8, btn_w, btn_h)
+            right_btn_rect = pygame.Rect(self.width // 2 + 80 - btn_w // 2, arrow_y - 8, btn_w, btn_h)
+
+            # Nền và viền tương đồng với hint (darker bg + white border)
+            pygame.draw.rect(self.screen, (50, 50, 50), left_btn_rect, border_radius=6)
+            pygame.draw.rect(self.screen, (255, 255, 255), left_btn_rect, 2, border_radius=6)
+            pygame.draw.rect(self.screen, (50, 50, 50), right_btn_rect, border_radius=6)
+            pygame.draw.rect(self.screen, (255, 255, 255), right_btn_rect, 2, border_radius=6)
+
+            # Vẽ ký hiệu mũi tên ở giữa nút (dùng polygon để đảm bảo hiển thị)
+            arrow_color = (255, 255, 255)
+            # left triangle
+            cx = left_btn_rect.x + left_btn_rect.w // 2
+            cy = left_btn_rect.y + left_btn_rect.h // 2
+            s = min(left_btn_rect.w, left_btn_rect.h) // 3
+            left_tri = [(cx - s, cy), (cx + s, cy - s), (cx + s, cy + s)]
+            pygame.draw.polygon(self.screen, arrow_color, left_tri)
+            # right triangle
+            cx = right_btn_rect.x + right_btn_rect.w // 2
+            cy = right_btn_rect.y + right_btn_rect.h // 2
+            s = min(right_btn_rect.w, right_btn_rect.h) // 3
+            right_tri = [(cx + s, cy), (cx - s, cy - s), (cx - s, cy + s)]
+            pygame.draw.polygon(self.screen, arrow_color, right_tri)
+            # Lưu rect để xử lý click
+            self.left_btn_rect = left_btn_rect
+            self.right_btn_rect = right_btn_rect
 
             # ⭐ Hiển thị số thứ tự
             bird_num_text = self.small_font.render(f"{self.selected_bird + 1}/{len(self.bird_types)}", True, (200, 200, 200))
@@ -649,14 +882,51 @@ class Game:
             diff_text = self.font.render(self.difficulties[self.selected_difficulty], True, diff_color)
             self.screen.blit(diff_text, (self.width // 2 - diff_text.get_width() // 2, diff_y_start + 50))
 
-            # ⭐ Hướng dẫn controls
-            hints = [
-                "◀ ▶  Change bird",
+            # ⭐ Hướng dẫn controls (thay dòng đổi chim bằng nút tương tác)
+            hint_y_start = 480
+
+            # Draw small hint buttons for Change Bird (centered)
+            hint_btn_w, hint_btn_h = 36, 36
+            gap = 8
+            total_w = hint_btn_w * 2 + gap + 120  # two arrows + label width approx
+            start_x = self.width // 2 - total_w // 2
+
+            hint_left = pygame.Rect(start_x, hint_y_start, hint_btn_w, hint_btn_h)
+            hint_label_x = hint_left.x + hint_btn_w + gap
+            hint_label = self.small_font.render("Change bird", True, (200, 200, 200))
+            hint_right = pygame.Rect(hint_label_x + hint_label.get_width() + gap, hint_y_start, hint_btn_w, hint_btn_h)
+
+            pygame.draw.rect(self.screen, (50, 50, 50), hint_left, border_radius=6)
+            pygame.draw.rect(self.screen, (255, 255, 255), hint_left, 2, border_radius=6)
+            pygame.draw.rect(self.screen, (50, 50, 50), hint_right, border_radius=6)
+            pygame.draw.rect(self.screen, (255, 255, 255), hint_right, 2, border_radius=6)
+
+            # draw triangle arrows for hint buttons to avoid font glyph issues
+            arrow_color = (255, 255, 255)
+            # left small triangle
+            cx = hint_left.x + hint_left.w // 2
+            cy = hint_left.y + hint_left.h // 2
+            s = min(hint_left.w, hint_left.h) // 3
+            left_tri = [(cx - s, cy), (cx + s, cy - s), (cx + s, cy + s)]
+            pygame.draw.polygon(self.screen, arrow_color, left_tri)
+            # label
+            self.screen.blit(hint_label, (hint_label_x, hint_y_start + hint_btn_h//2 - hint_label.get_height()//2))
+            # right small triangle
+            cx = hint_right.x + hint_right.w // 2
+            cy = hint_right.y + hint_right.h // 2
+            s = min(hint_right.w, hint_right.h) // 3
+            right_tri = [(cx + s, cy), (cx - s, cy - s), (cx - s, cy + s)]
+            pygame.draw.polygon(self.screen, arrow_color, right_tri)
+
+            # save hint rects to allow clicking these too
+            self.hint_left_rect = hint_left
+            self.hint_right_rect = hint_right
+
+            # remaining textual hints
+            other_hints = [
                 "▲ ▼  Change difficulty",
                 "SPACE  Back to menu"
             ]
-
-            hint_y_start = 480
-            for i, line in enumerate(hints):
+            for i, line in enumerate(other_hints):
                 hint_text = self.small_font.render(line, True, (200, 200, 200))
-                self.screen.blit(hint_text, (self.width // 2 - hint_text.get_width() // 2, hint_y_start + i * 25))
+                self.screen.blit(hint_text, (self.width // 2 - hint_text.get_width() // 2, hint_y_start + 40 + i * 25))

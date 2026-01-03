@@ -1,30 +1,40 @@
 import pygame
 import os
 from game import Game
+from utils import ResourceManager, FileManager
+
+
+class GameApp:
+    def __init__(self, size=(400, 600)):
+        os.chdir(os.path.dirname(__file__))
+        pygame.init()
+        self.screen = pygame.display.set_mode(size)
+        pygame.display.set_caption("Flappy Bird Day")
+        self.clock = pygame.time.Clock()
+        self.resource_manager = ResourceManager()
+        self.file_manager = FileManager()
+        self.game = Game(self.screen, resource_manager=self.resource_manager, file_manager=self.file_manager)
+
+    def run(self):
+        running = True
+        while running:
+            self.clock.tick(60)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                self.game.handle_event(event)
+
+            self.game.update()
+            self.game.draw()
+            pygame.display.flip()
+
+        pygame.quit()
+
 
 def main():
-    os.chdir(os.path.dirname(__file__))  # set working directory to scr/
-    pygame.init()
-    screen = pygame.display.set_mode((400, 600))
-    pygame.display.set_caption("Flappy Bird Day")
+    app = GameApp()
+    app.run()
 
-    clock = pygame.time.Clock()
-    game = Game(screen)
-
-
-    running = True
-    while running:
-        clock.tick(60)
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            game.handle_event(event)
-
-        game.update()
-        game.draw()
-        pygame.display.flip()
-
-    pygame.quit()
 
 if __name__ == "__main__":
     main()

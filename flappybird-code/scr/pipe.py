@@ -2,7 +2,7 @@ import pygame
 import random
 
 class Pipe:
-    def __init__(self, x, gap_y, gap_height=None, speed=3):
+    def __init__(self, x, gap_y, gap_height=None, speed=3, resource_manager=None):
         self.x = x
         self.gap_y = gap_y
         if gap_height is None:
@@ -12,9 +12,12 @@ class Pipe:
         self.speed = speed
         self.scored = False
 
-        # chỉ có ảnh ống dưới
-        self.image_bottom = pygame.image.load("../assets/images/pipe-green.png").convert_alpha()
-        self.image_bottom = pygame.transform.scale(self.image_bottom, (self.width, self.image_bottom.get_height()))
+        # only bottom image; allow ResourceManager to provide it
+        if resource_manager:
+            img = resource_manager.load_image("../assets/images/pipe-green.png").convert_alpha()
+        else:
+            img = pygame.image.load("../assets/images/pipe-green.png").convert_alpha()
+        self.image_bottom = pygame.transform.scale(img, (self.width, img.get_height()))
 
         # tạo ảnh ống trên bằng cách lật ngược ảnh dưới
         self.image_top = pygame.transform.flip(self.image_bottom, False, True)
